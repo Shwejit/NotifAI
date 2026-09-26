@@ -1,6 +1,6 @@
 # NotifAI
 
-A notification infrastructure platform for applications. NotifyBell will provide a tenant-scoped API and an embeddable user inbox. The project is being built incrementally as a TypeScript modular monolith.
+A notification infrastructure platform for applications. NotifAI will provide a tenant-scoped API and an embeddable user inbox. The project is being built incrementally as a TypeScript modular monolith.
 
 ## Phase 1 architecture
 
@@ -50,9 +50,9 @@ The API listens on `http://localhost:3000`; check `http://localhost:3000/health`
 | `PORT`              | API port                                   | `3000`                 |
 | `DATABASE_URL`      | PostgreSQL connection used by Prisma       | local Compose database |
 | `REDIS_URL`         | Redis connection reserved for later phases | local Compose Redis    |
-| `POSTGRES_USER`     | Compose database user                      | `notifybell`           |
-| `POSTGRES_PASSWORD` | Compose database password                  | `notifybell_dev`       |
-| `POSTGRES_DB`       | Compose database name                      | `notifybell`           |
+| `POSTGRES_USER`     | Compose database user                      | `notifai`              |
+| `POSTGRES_PASSWORD` | Compose database password                  | `notifai_dev`          |
+| `POSTGRES_DB`       | Compose database name                      | `notifai`              |
 
 ## Local services and database
 
@@ -61,7 +61,7 @@ Docker Compose runs PostgreSQL 17 and Redis 7 with health checks. PostgreSQL dat
 To validate the empty starter schema or regenerate the client:
 
 ```powershell
-$env:DATABASE_URL = "postgresql://notifybell:notifybell_dev@localhost:5432/notifybell?schema=public"
+$env:DATABASE_URL = "postgresql://notifai:notifai_dev@localhost:5432/notifai?schema=public"
 corepack pnpm exec prisma validate
 corepack pnpm exec prisma generate
 ```

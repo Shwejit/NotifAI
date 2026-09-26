@@ -3,9 +3,9 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-notifybell}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notifybell_dev}
-      POSTGRES_DB: ${POSTGRES_DB:-notifybell}
+      POSTGRES_USER: ${POSTGRES_USER:-notifai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notifai_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-notifai}
     ports:
       - '5432:5432'
     volumes:
@@ -14,7 +14,7 @@ services:
       test:
         [
           'CMD-SHELL',
-          'pg_isready -U ${POSTGRES_USER:-notifybell} -d ${POSTGRES_DB:-notifybell}',
+          'pg_isready -U ${POSTGRES_USER:-notifai} -d ${POSTGRES_DB:-notifai}',
         ]
       interval: 5s
       timeout: 5s
