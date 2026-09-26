@@ -1,4 +1,4 @@
-# NotifyBell
+# NotifAI
 
 A notification infrastructure platform for applications. NotifyBell will provide a tenant-scoped API and an embeddable user inbox. The project is being built incrementally as a TypeScript modular monolith.
 
