@@ -14,7 +14,7 @@ export function buildApp(prisma: PrismaClient = defaultPrisma) {
     },
   });
   app.register(fastifySensible);
-  app.register(authPlugin, { prisma });2
+  app.register(authPlugin, { prisma });
   app.register(adminRoutes(prisma));
   app.register(authRoutes);
 
