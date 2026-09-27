@@ -1,17 +1,15 @@
-# Phase 2 architecture
+# Phase 3 architecture
 
-NotifAI is a modular monolith: one Fastify API process and PostgreSQL as the source of truth. Redis is available for later phases but has no application logic yet.
+The API resolves a tenant from the server API key. Users are unique by `(tenantId, externalId)`. Notifications reference both their tenant and tenant-owned user; inbox operations always filter by the authenticated tenant.
 
-## Multi-tenancy
+PostgreSQL enforces `(tenantId, idempotencyKey)` uniqueness. Inbox pages use a stable descending `(createdAt, id)` cursor. Redis is not used by the Phase 3 request path.
 
-`Tenant` is the isolation boundary. One tenant has many `ApiKey` records through `ApiKey.tenantId`; API keys are server-to-server credentials. `Tenant.slug` is unique, and `ApiKey.tenantId` is indexed and protected by a foreign key.
+## Phase 5 async delivery
 
-## API-key authentication
+An authenticated notification request atomically inserts the Notification and its EMAIL Delivery in PostgreSQL. The API then enqueues deliveryId and notificationId in BullMQ and returns without waiting on the provider. Missing email is recorded as a FAILED Delivery without queueing a job.
 
-Keys are generated with Node crypto, returned only at creation, and stored as a SHA-256 hash with a safe prefix. The auth plugin hashes the Bearer secret, rejects missing/invalid/revoked/expired records with 401, updates `lastUsedAt`, and attaches the resolved tenant to the Fastify request. Authorization headers are redacted from logs.
+The notification-email worker loads the current Delivery, Notification, and User from PostgreSQL. The provider interface currently uses a mock implementation by default; it logs recipient and subject metadata only. A real provider can implement the same interface without changing route or worker orchestration.
 
-## Tenant isolation pattern
+BullMQ retries transient provider errors three times with exponential backoff starting at one second. Permanent provider failures stop immediately. Exhausted jobs remain as failed jobs in BullMQ for inspection, and the Delivery stores FAILED plus its final error. GET /v1/deliveries/:id is tenant-scoped.
 
-Every future tenant-owned query must carry the authenticated `request.tenant.id` as `tenantId` in its Prisma `where` or `data` clause. The database relation and indexed foreign key make tenant ownership explicit; application code must never query tenant-owned records by an unscoped global identifier.
-
-Run `docker compose up -d --wait` followed by `corepack pnpm exec prisma migrate deploy` against the local PostgreSQL service to apply the first migration. Docker PostgreSQL is exposed on host port `5433` to avoid conflicts with a locally installed PostgreSQL server on `5432`. The development/admin endpoints and authenticated request example are documented in the root README.
+PostgreSQL is the source of truth, Redis carries Pub/Sub and queue traffic through separate connections, BullMQ manages asynchronous jobs, and the worker performs the external side effect. If enqueueing fails, the notification remains successful and the Delivery is marked FAILED where possible. A transactional outbox is not included in this phase.
