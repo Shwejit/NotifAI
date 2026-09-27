@@ -2,7 +2,7 @@
 
 A notification infrastructure platform for applications. NotifAI will provide a tenant-scoped API and an embeddable user inbox. The project is being built incrementally as a TypeScript modular monolith.
 
-## Phase 1 architecture
+## Phase 2 architecture
 
 ```mermaid
 flowchart LR
@@ -11,7 +11,7 @@ flowchart LR
   API -. future cache and pub/sub .-> Redis[(Redis)]
 ```
 
-Phase 1 creates the workspace, API shell, configuration, Prisma datasource, and local PostgreSQL/Redis services. Only `GET /health` is implemented; feature APIs and Redis application logic are deferred.
+Phase 2 adds the multi-tenant database foundation and server-to-server API-key authentication. A tenant owns many API keys; authenticated requests resolve exactly one tenant and future tenant-owned queries must include `tenantId`. Notifications, queues, Redis application logic, dashboards, and user authentication remain deferred.
 
 ## Prerequisites
 
@@ -56,12 +56,30 @@ The API listens on `http://localhost:3000`; check `http://localhost:3000/health`
 
 ## Local services and database
 
-Docker Compose runs PostgreSQL 17 and Redis 7 with health checks. PostgreSQL data persists in the `postgres_data` named volume. Prisma is configured for PostgreSQL and its client can be generated, but Phase 1 has no application schema or migration.
+Docker Compose runs PostgreSQL 17 and Redis 7 with health checks. PostgreSQL data persists in the `postgres_data` named volume. Apply the first migration after starting PostgreSQL:
+
+```powershell
+docker compose up -d --wait
+corepack pnpm exec prisma migrate deploy
+corepack pnpm exec prisma generate
+```
+
+The migration creates `Tenant` and `ApiKey`. Raw API keys are never stored: only a SHA-256 hash and short identification prefix are persisted. The secret is returned once by the development/admin key-creation endpoint.
+
+For local development, create a tenant and key, then call the protected endpoint:
+
+```powershell
+$tenant = Invoke-RestMethod http://localhost:3000/v1/tenants -Method Post -ContentType 'application/json' -Body '{"name":"Demo","slug":"demo"}'
+$key = Invoke-RestMethod "http://localhost:3000/v1/tenants/$($tenant.id)/api-keys" -Method Post -ContentType 'application/json' -Body '{"name":"Demo server"}'
+curl.exe http://localhost:3000/v1/auth/me -H "Authorization: Bearer $($key.secret)"
+```
+
+`POST /v1/tenants` and `POST /v1/tenants/:tenantId/api-keys` are intentionally minimal development/admin endpoints for Phase 2, not a production user-management system. Protected routes use `Authorization: Bearer <secret-api-key>` and return 401 for missing, invalid, revoked, or expired keys.
 
 To validate the empty starter schema or regenerate the client:
 
 ```powershell
-$env:DATABASE_URL = "postgresql://notifai:notifai_dev@localhost:5432/notifai?schema=public"
+$env:DATABASE_URL = "postgresql://notifai:notifai_dev@127.0.0.1:5433/notifai?schema=public"
 corepack pnpm exec prisma validate
 corepack pnpm exec prisma generate
 ```
@@ -78,4 +96,4 @@ corepack pnpm exec prisma generate
 
 ## Next phases
 
-Phase 2 adds the Prisma schema and migrations, tenant and API-key models, authentication, and tenant-isolation tests. Notifications, queues, real-time delivery, SDK/dashboard, and AI are intentionally out of scope for Phase 1.
+Phase 2 complete: Prisma schema/migration, tenant/API-key authentication, strict tenant resolution, and isolation tests are implemented. The next phase should add the notification domain model and tenant-scoped notification creation/query APIs only after confirmation.

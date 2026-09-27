@@ -19,12 +19,14 @@
     "eslint-config-prettier": "^10.1.5",
     "prettier": "^3.6.2",
     "prisma": "^6.19.0",
+    "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.34.1",
-    "tsx": "^4.19.4",
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.0"
+    "@fastify/sensible": "^6.0.3",
+    "@prisma/client": "^6.19.0",
+    "fastify-plugin": "^6.0.0"
   }
 }
