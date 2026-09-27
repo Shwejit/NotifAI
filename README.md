@@ -1,99 +1,91 @@
 # NotifAI
 
-A notification infrastructure platform for applications. NotifAI will provide a tenant-scoped API and an embeddable user inbox. The project is being built incrementally as a TypeScript modular monolith.
+A notification infrastructure platform for applications. NotifAI provides a tenant-scoped API and an embeddable user inbox, built incrementally as a TypeScript modular monolith.
 
-## Phase 2 architecture
+## Architecture
 
 ```mermaid
 flowchart LR
   Client[Client application] --> API[Fastify API]
-  API -. future persistence .-> PG[(PostgreSQL)]
-  API -. future cache and pub/sub .-> Redis[(Redis)]
+  API --> PG[(PostgreSQL via Prisma)]
+  API --> Redis[(Redis Pub/Sub)]
+  Redis --> SSE[SSE client]
 ```
 
-Phase 2 adds the multi-tenant database foundation and server-to-server API-key authentication. A tenant owns many API keys; authenticated requests resolve exactly one tenant and future tenant-owned queries must include `tenantId`. Notifications, queues, Redis application logic, dashboards, and user authentication remain deferred.
+Tenant context comes from the authenticated server API key. User external IDs are unique inside a tenant. Notifications have both tenant and user ownership, and database constraints enforce tenant-scoped idempotency.
 
-## Prerequisites
+## Phase 3 API
 
-- Node.js 20 or newer
-- Corepack (included with Node.js)
-- Docker Desktop with Docker Compose
+All routes below require `Authorization: Bearer <server-api-key>`.
 
-The repository pins pnpm 10.12.1 in `package.json`; use Corepack to run it without a global install.
+| Method  | Endpoint                                                            | Purpose                                                        |
+| ------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `POST`  | `/v1/users`                                                         | Create a tenant user by external ID                            |
+| `POST`  | `/v1/notifications`                                                 | Create a notification for a tenant user                        |
+| `GET`   | `/v1/notifications/:id`                                             | Retrieve a notification within the key's tenant                |
+| `GET`   | `/v1/inbox?userId=...&cursor=...&limit=...&status=...&category=...` | List inbox items, newest first                                 |
+| `GET`   | `/v1/inbox/unread-count?userId=...`                                 | Count non-archived unread items                                |
+| `PATCH` | `/v1/inbox/:id/read`                                                | Mark an item read                                              |
+| `PATCH` | `/v1/inbox/:id/unread`                                              | Mark an item unread                                            |
+| `POST`  | `/v1/inbox/read-all`                                                | Mark a user's active unread items read (`{ "userId": "..." }`) |
+| `PATCH` | `/v1/inbox/:id/archive`                                             | Archive an item                                                |
 
-## Setup and run
+`POST /v1/notifications` accepts `externalUserId`, `title`, and `body`; it may also include `category`, `actionUrl`, `priority`, and `idempotencyKey`. Reusing an idempotency key within the same tenant returns the original notification. PostgreSQL's `(tenantId, idempotencyKey)` unique constraint handles simultaneous retries; the same key can be used by another tenant.
+
+Inbox pagination uses an opaque cursor containing `createdAt` and `id`, ordered newest first. Use the returned `nextCursor` for the next request; it is `null` when no more items remain. Archived notifications are excluded by default.
+
+Invalid request data returns `400`, missing or invalid API keys return `401`, duplicate user external IDs return `409`, and resources outside the authenticated tenant return `404`.
+
+## Setup and verification
+
+Prerequisites: Node.js 20+, Corepack/pnpm 10, and PostgreSQL (Docker Compose is available for local services).
 
 ```powershell
 Copy-Item .env.example .env
 corepack pnpm install
+docker compose up -d --wait
+corepack pnpm exec prisma migrate deploy
+corepack pnpm exec prisma generate
 corepack pnpm format:check
 corepack pnpm lint
 corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
-docker compose up -d --wait
 corepack pnpm start
 ```
 
-The API listens on `http://localhost:3000`; check `http://localhost:3000/health`. Stop the API with Ctrl+C. Stop the local services with `docker compose down` (add `-v` only when you intend to remove the local database volume).
+The API listens on `http://localhost:3000`; `GET /health` returns `{ "status": "ok" }`. Phase 3 tests use Fastify's in-process `inject` API and Vitest. Stop the API with Ctrl+C and services with `docker compose down`.
 
-`corepack pnpm dev` starts the TypeScript watch process. In environments where `tsx` cannot resolve the current Windows user identity, use the verified build-and-start commands above.
+## Phase 4 realtime
 
-## Environment variables
+After a successful PostgreSQL write, the API publishes a small event to Redis Pub/Sub; an authenticated SSE stream forwards events to connected consumers. PostgreSQL remains the source of truth, Redis is transient transport, and a Redis publish failure is logged without failing the successful API write.
 
-`.env.example` documents all local settings. Copy it to `.env` before startup. The checked-in example credentials are for local development only.
+GET /v1/inbox/stream?userId=<user-id> requires the existing Bearer server API key and verifies that user belongs to the key's tenant. Events: notification.created, notification.read, notification.unread, notification.archived, and notification.read_all. Channels use notifai:{tenantId}:user:{userId}. The stream sends heartbeat comments and removes subscriptions on disconnect.
 
-| Variable            | Purpose                                    | Default                |
-| ------------------- | ------------------------------------------ | ---------------------- |
-| `NODE_ENV`          | Runtime mode                               | `development`          |
-| `HOST`              | API bind address                           | `0.0.0.0`              |
-| `PORT`              | API port                                   | `3000`                 |
-| `DATABASE_URL`      | PostgreSQL connection used by Prisma       | local Compose database |
-| `REDIS_URL`         | Redis connection reserved for later phases | local Compose Redis    |
-| `POSTGRES_USER`     | Compose database user                      | `notifai`              |
-| `POSTGRES_PASSWORD` | Compose database password                  | `notifai_dev`          |
-| `POSTGRES_DB`       | Compose database name                      | `notifai`              |
+Native browser EventSource does not support custom Authorization headers. Never put a server key in browser code or the stream URL. A future browser SDK should use a short-lived signed token scoped to tenant, user, and expiry.
 
-## Local services and database
+## Earlier phases and next work
 
-Docker Compose runs PostgreSQL 17 and Redis 7 with health checks. PostgreSQL data persists in the `postgres_data` named volume. Apply the first migration after starting PostgreSQL:
+Phase 1 established the workspace, API shell, Prisma, PostgreSQL, and Redis Compose services. Phase 2 added tenants and hashed server API keys. Phase 3 adds tenant users, notifications, inbox actions, pagination, and idempotency. Phase 4 adds Redis Pub/Sub and authenticated SSE realtime delivery.
 
-```powershell
-docker compose up -d --wait
-corepack pnpm exec prisma migrate deploy
-corepack pnpm exec prisma generate
-```
+## Phase 5 async email delivery
 
-The migration creates `Tenant` and `ApiKey`. Raw API keys are never stored: only a SHA-256 hash and short identification prefix are persisted. The secret is returned once by the development/admin key-creation endpoint.
+A notification and its EMAIL Delivery row are created together in PostgreSQL. If the user has no email, the delivery is recorded as FAILED with a reason and no job is queued. Otherwise the API enqueues only deliveryId and notificationId in the notification-email BullMQ queue and returns without waiting for email sending.
 
-For local development, create a tenant and key, then call the protected endpoint:
+The worker loads current notification and user data from PostgreSQL, then uses the EmailProvider interface. The local mock provider logs metadata only; it sends no real email. BullMQ retries temporary errors up to three attempts with exponential backoff starting at one second. Permanent provider errors stop retries. Final failed jobs remain in BullMQ for inspection, and Delivery records FAILED with the final error. Delivery status can be read at GET /v1/deliveries/:id by an API key belonging to the notification's tenant.
 
-```powershell
-$tenant = Invoke-RestMethod http://localhost:3000/v1/tenants -Method Post -ContentType 'application/json' -Body '{"name":"Demo","slug":"demo"}'
-$key = Invoke-RestMethod "http://localhost:3000/v1/tenants/$($tenant.id)/api-keys" -Method Post -ContentType 'application/json' -Body '{"name":"Demo server"}'
-curl.exe http://localhost:3000/v1/auth/me -H "Authorization: Bearer $($key.secret)"
-```
+PostgreSQL remains the source of truth; Redis carries both Phase 4 Pub/Sub messages and Phase 5 BullMQ jobs using separate connections. If job enqueueing fails, the notification remains created and its delivery is recorded as FAILED when possible. There is no transactional outbox in this phase.
 
-`POST /v1/tenants` and `POST /v1/tenants/:tenantId/api-keys` are intentionally minimal development/admin endpoints for Phase 2, not a production user-management system. Protected routes use `Authorization: Bearer <secret-api-key>` and return 401 for missing, invalid, revoked, or expired keys.
+For local development, run the API and worker in separate VS Code terminals: corepack pnpm dev and corepack pnpm dev:worker. Build and run the worker with corepack pnpm build and corepack pnpm worker. Configure EMAIL_PROVIDER=mock and EMAIL_FROM in .env; no email credentials are needed.
 
-To validate the empty starter schema or regenerate the client:
+## Phase 6 preferences, DND, and digest foundation
 
-```powershell
-$env:DATABASE_URL = "postgresql://notifai:notifai_dev@127.0.0.1:5433/notifai?schema=public"
-corepack pnpm exec prisma validate
-corepack pnpm exec prisma generate
-```
+Preferences are stored per user and category. Missing channel preferences default to enabled for IN_APP and EMAIL; explicit rows override that default. Categories are free-form strings, with uncategorized notifications evaluated as `default`. Preferences are accessed only after verifying the user belongs to the API key tenant.
 
-## Scripts
+`PUT /v1/preferences` updates one `{ userId, category, channel, enabled }` rule; `GET /v1/preferences?userId=...` lists stored rules and effective defaults. Disabling EMAIL suppresses only the external email attempt. The notification remains in PostgreSQL, inbox, and realtime flow; its EMAIL Delivery is marked `SUPPRESSED` with a reason and is not queued.
 
-- `corepack pnpm dev` — run the API with reload on changes
-- `corepack pnpm format` / `corepack pnpm format:check` — format or verify formatting
-- `corepack pnpm lint` — lint API TypeScript
-- `corepack pnpm typecheck` — strict TypeScript check
-- `corepack pnpm test` — run API tests
-- `corepack pnpm build` — compile the API to `apps/api/dist`
-- `corepack pnpm start` — run the compiled API
+DND can be configured with `PUT /v1/preferences/dnd` and read with `GET /v1/preferences/dnd?userId=...`. Its `enabled`, `startTime`, `endTime`, and IANA `timezone` settings support windows crossing midnight. DND never deletes inbox notifications. While active, immediate email is suppressed and recorded; this phase does not schedule a later send. The worker checks preferences and DND again immediately before sending, so settings changed after enqueueing are respected.
 
-## Next phases
+Digest configuration uses `PUT /v1/preferences/digest` and `GET /v1/preferences/digest?userId=...`; it stores enabled, DAILY/WEEKLY frequency, EMAIL channel, preferred local time, and timezone. Digest generation, scheduling, and sending are not implemented yet.
 
-Phase 2 complete: Prisma schema/migration, tenant/API-key authentication, strict tenant resolution, and isolation tests are implemented. The next phase should add the notification domain model and tenant-scoped notification creation/query APIs only after confirmation.
+Delivery decision flow: Notification ? preference check ? DND check ? Delivery/BullMQ when allowed ? worker rechecks ? email. PostgreSQL remains authoritative; `SUPPRESSED` is a terminal observable result for this phase.

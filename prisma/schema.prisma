@@ -11,29 +11,164 @@ enum ApiKeyType {
   SERVER
 }
 
-model Tenant {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum NotificationPriority {
+  URGENT
+  IMPORTANT
+  LOW
+}
 
-  apiKeys ApiKey[]
+enum DeliveryChannel {
+  IN_APP
+  EMAIL
+  WEB_PUSH
+  MOBILE_PUSH
+  SMS
+}
+
+enum DeliveryStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+  FAILED
+  SUPPRESSED
+}
+
+enum PreferenceChannel {
+  IN_APP
+  EMAIL
+  WEB_PUSH
+  MOBILE_PUSH
+  SMS
+}
+
+enum DigestFrequency {
+  DAILY
+  WEEKLY
+}
+
+enum DigestChannel {
+  EMAIL
+}
+
+model Tenant {
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String
+  slug          String         @unique
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  apiKeys       ApiKey[]
+  users         User[]
+  notifications Notification[]
 }
 
 model ApiKey {
-  id        String      @id @default(uuid()) @db.Uuid
-  tenantId  String      @db.Uuid
-  name      String
-  keyHash   String      @unique
-  prefix    String
-  type      ApiKeyType  @default(SERVER)
-  createdAt DateTime    @default(now())
+  id         String     @id @default(uuid()) @db.Uuid
+  tenantId   String     @db.Uuid
+  name       String
+  keyHash    String     @unique
+  prefix     String
+  type       ApiKeyType @default(SERVER)
+  createdAt  DateTime   @default(now())
   lastUsedAt DateTime?
-  revokedAt DateTime?
-  expiresAt DateTime?
+  revokedAt  DateTime?
+  expiresAt  DateTime?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  externalId   String
+  email        String?
+  name         String?
+  timezone     String?
+  dndEnabled   Boolean  @default(false)
+  dndStartTime String?
+  dndEndTime   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  notifications    Notification[]
+  preferences      Preference[]
+  digestPreference DigestPreference?
+
+  @@unique([tenantId, externalId])
+  @@unique([tenantId, id])
+  @@index([tenantId])
+}
+
+model Notification {
+  id             String               @id @default(uuid()) @db.Uuid
+  tenantId       String               @db.Uuid
+  userId         String               @db.Uuid
+  title          String
+  body           String
+  category       String?
+  actionUrl      String?
+  priority       NotificationPriority @default(IMPORTANT)
+  idempotencyKey String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  readAt         DateTime?
+  archivedAt     DateTime?
+  scheduledAt    DateTime?
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [tenantId, userId], references: [tenantId, id], onDelete: Cascade)
+  deliveries Delivery[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+  @@index([tenantId, userId, createdAt, id])
+}
+
+model Delivery {
+  id             String          @id @default(uuid()) @db.Uuid
+  notificationId String          @db.Uuid
+  channel        DeliveryChannel
+  status         DeliveryStatus  @default(PENDING)
+  attempts       Int             @default(0)
+  error          String?
+  lastAttemptAt  DateTime?
+  deliveredAt    DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([status, createdAt])
+}
+
+model Preference {
+  id        String            @id @default(uuid()) @db.Uuid
+  userId    String            @db.Uuid
+  category  String
+  channel   PreferenceChannel
+  enabled   Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, category, channel])
+  @@index([userId])
+}
+
+model DigestPreference {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @unique @db.Uuid
+  enabled       Boolean         @default(false)
+  frequency     DigestFrequency @default(DAILY)
+  channel       DigestChannel   @default(EMAIL)
+  preferredTime String          @default("09:00")
+  timezone      String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -8,6 +8,9 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
   DATABASE_URL: z.string().min(1),
+  REDIS_URL: z.string().url().default('redis://localhost:6379'),
+  EMAIL_PROVIDER: z.enum(['mock']).default('mock'),
+  EMAIL_FROM: z.string().email().default('notifications@notifai.local'),
 });
 
 export const config = envSchema.parse(process.env);
